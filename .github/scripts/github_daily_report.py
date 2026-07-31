@@ -4,6 +4,8 @@ GitHub Daily Report Generator — 生成报告 → GitHub 推送 → 飞书文�
 """
 
 import json, os, re, subprocess, urllib.request
+import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 BEIJING = timezone(timedelta(hours=8))
@@ -58,27 +60,79 @@ def fetch_trending():
         return []
 
 
+# ═══ 翻译 ═══
+
+def translate_to_chinese(text):
+    """调用免费翻译接口，失败时保留原文"""
+    if not text or len(text.strip()) < 2:
+        return text or ""
+    q = urllib.parse.quote(text)
+    url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q={q}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            parts = data[0]
+            out = "".join(p[0] for p in parts if p and p[0])
+            return out if out else text
+    except Exception:
+        return text
+
+
+def translate_many(texts):
+    """并发翻译，避免重复调用"""
+    unique = list(dict.fromkeys(t for t in texts if t))
+    cache = {}
+
+    def work(t):
+        cache[t] = translate_to_chinese(t)
+
+    if unique:
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            list(ex.map(work, unique))
+    return cache
+
+
 # ═══ 报告生成 ═══
 
 def build_report(all_time, new_week, trending):
     lines = []
+
+    # 收集所有简介并翻译成中文（repo_info 结果缓存，避免重复请求）
+    descs = []
+    info_cache = {}
+    if isinstance(all_time, dict) and "items" in all_time:
+        for r in all_time["items"][:10]:
+            descs.append(r.get("description") or "")
+    if isinstance(new_week, dict) and "items" in new_week:
+        for r in new_week["items"][:15]:
+            descs.append(r.get("description") or "")
+    for repo in trending[:15]:
+        info = repo_info(repo)
+        info_cache[repo] = info
+        if isinstance(info, dict):
+            descs.append(info.get("description") or "")
+    translations = translate_many(descs)
+
+    def cn(text):
+        return translations.get(text, text)
     lines += ["# GitHub 近一周项目分析报告\n", f"**报告日期：** {TODAY}（北京时间）  ", "**数据来源：** GitHub API + GitHub Trending (Weekly)", "", "---", ""]
 
     lines += ["## 第一部分：总 Star 排名前十（全历史累计）\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
     if isinstance(all_time, dict) and "items" in all_time:
         for i, r in enumerate(all_time["items"][:10], 1):
-            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or '-'} | {(r.get('description') or '')[:70]} |")
+            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or '-'} | {cn(r.get('description') or '')[:70]} |")
     lines += ["", "---", "", "## 第二部分：本周 Star 增长排名\n", "### 2.1 本周新星爆发榜\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
     if isinstance(new_week, dict) and "items" in new_week:
         for i, r in enumerate(new_week["items"][:15], 1):
-            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or 'N/A'} | {(r.get('description') or '')[:60]} |")
+            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or 'N/A'} | {cn(r.get('description') or '')[:60]} |")
     lines += ["", "### 2.2 本周 Trending\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
     for i, repo in enumerate(trending[:15], 1):
-        info = repo_info(repo)
+        info = info_cache.get(repo) or repo_info(repo)
         if isinstance(info, dict):
             s = f"{info.get('stargazers_count', 0):,}"
             l = info.get("language") or "N/A"
-            d = (info.get("description") or "")[:60]
+            d = (cn(info.get("description") or ""))[:60]
         else:
             s, l, d = "?", "?", ""
         lines.append(f"| {i} | **[{repo}](https://github.com/{repo})** | {s} | {l} | {d} |")
@@ -116,7 +170,7 @@ def build_report(all_time, new_week, trending):
                 l = r.get("language")
                 if l: lang_counts[l] = lang_counts.get(l, 0) + 1
     for repo in trending[:15]:
-        info = repo_info(repo)
+        info = info_cache.get(repo) or repo_info(repo)
         if isinstance(info, dict):
             l = info.get("language")
             if l: lang_counts[l] = lang_counts.get(l, 0) + 1
