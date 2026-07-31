@@ -20,6 +20,7 @@ API_BASE = "https://api.github.com"
 FEISHU_APP_ID = os.environ.get("FEISHU_APP_ID", "")
 FEISHU_APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
 FEISHU_WEBHOOK = os.environ.get("FEISHU_WEBHOOK", "")
+GITHUB_TOKEN = os.environ.get("GH_PAT", "")
 
 
 def log(msg):
@@ -30,7 +31,11 @@ def log(msg):
 
 def api_get(url):
     try:
-        r = subprocess.run(["curl", "-sf", url], capture_output=True, text=True, timeout=30)
+        cmd = ["curl", "-sf"]
+        if GITHUB_TOKEN:
+            cmd += ["-H", f"Authorization: Bearer {GITHUB_TOKEN}"]
+        cmd.append(url)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         return json.loads(r.stdout) if r.returncode == 0 and r.stdout else None
     except:
         return None
@@ -93,46 +98,137 @@ def translate_many(texts):
     return cache
 
 
+def read_raw_text(url):
+    """读取 raw.githubusercontent 内容"""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+
+
+def _has_chinese(text):
+    return bool(re.search(r"[\u4e00-\u9fff]", text or ""))
+
+
+def extract_chinese_description(readme_text):
+    """从中文 README 中提取一句项目简介"""
+    text = re.sub(r"```.*?```", "", readme_text, flags=re.DOTALL)
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    for line in text.splitlines():
+        line = line.strip()
+        if len(line) < 8 or not _has_chinese(line):
+            continue
+        if line.startswith(("#", ">", "-", "*", "|", "[!", "<", "```")):
+            continue
+        clean = re.sub(r"!\[[^\]]*\]\([^\)]*\)", "", line)
+        clean = re.sub(r"\[([^\]]*)\]\([^\)]*\)", r"\1", clean)
+        clean = re.sub(r"`([^`]*)`", r"\1", clean)
+        clean = re.sub(r"\*\*([^*]+)\*\*", r"\1", clean)
+        clean = re.sub(r"\*([^*]+)\*", r"\1", clean)
+        clean = re.sub(r"^#{1,6}\s*", "", clean)
+        clean = re.sub(r"\s+", " ", clean).strip()
+        cn_count = len(re.findall(r"[\u4e00-\u9fff]", clean))
+        if len(clean) >= 8 and cn_count >= 4:
+            if re.search(r"english|中文|简体|繁体", clean, re.I) and cn_count < 10:
+                continue
+            return clean[:300]
+    return None
+
+
+def get_chinese_description(full_name):
+    """优先从仓库 README 中找简体中文简介"""
+    try:
+        files = api_get(f"{API_BASE}/repos/{full_name}/contents")
+        if not isinstance(files, list):
+            return None
+        candidates = []
+        for f in files:
+            name = f.get("name", "")
+            if not name.upper().startswith("README"):
+                continue
+            lower = name.lower()
+            if lower == "readme.md" or any(k in lower for k in ["zh", "cn", "chinese", "简体", "中文"]):
+                candidates.append(f)
+        for f in candidates:
+            url = f.get("download_url")
+            if not url:
+                continue
+            text = read_raw_text(url)
+            if text and _has_chinese(text):
+                desc = extract_chinese_description(text)
+                if desc:
+                    return desc
+    except Exception:
+        return None
+    return None
+
+
+def get_native_chinese_descriptions(full_names):
+    """并发读取多个仓库的 README 中文简介"""
+    unique = list(dict.fromkeys(n for n in full_names if n))
+    cache = {}
+
+    def work(name):
+        cache[name] = get_chinese_description(name)
+
+    if unique:
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            list(ex.map(work, unique))
+    return cache
+
+
 # ═══ 报告生成 ═══
 
 def build_report(all_time, new_week, trending):
     lines = []
 
-    # 收集所有简介并翻译成中文（repo_info 结果缓存，避免重复请求）
+    # 先尝试 README 中文简介，缺失的再用英文简介翻译兜底
+    repo_names = []
+    if isinstance(all_time, dict) and "items" in all_time:
+        repo_names += [r["full_name"] for r in all_time["items"][:10]]
+    if isinstance(new_week, dict) and "items" in new_week:
+        repo_names += [r["full_name"] for r in new_week["items"][:15]]
+    repo_names += trending[:15]
+    native_cn = get_native_chinese_descriptions(repo_names)
+
     descs = []
     info_cache = {}
     if isinstance(all_time, dict) and "items" in all_time:
         for r in all_time["items"][:10]:
-            descs.append(r.get("description") or "")
+            if not native_cn.get(r["full_name"]):
+                descs.append(r.get("description") or "")
     if isinstance(new_week, dict) and "items" in new_week:
         for r in new_week["items"][:15]:
-            descs.append(r.get("description") or "")
+            if not native_cn.get(r["full_name"]):
+                descs.append(r.get("description") or "")
     for repo in trending[:15]:
         info = repo_info(repo)
         info_cache[repo] = info
-        if isinstance(info, dict):
+        if isinstance(info, dict) and not native_cn.get(repo):
             descs.append(info.get("description") or "")
     translations = translate_many(descs)
 
-    def cn(text):
-        return translations.get(text, text)
+    def cn(full_name, text):
+        return native_cn.get(full_name) or translations.get(text, text)
     lines += ["# GitHub 近一周项目分析报告\n", f"**报告日期：** {TODAY}（北京时间）  ", "**数据来源：** GitHub API + GitHub Trending (Weekly)", "", "---", ""]
 
     lines += ["## 第一部分：总 Star 排名前十（全历史累计）\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
     if isinstance(all_time, dict) and "items" in all_time:
         for i, r in enumerate(all_time["items"][:10], 1):
-            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or '-'} | {cn(r.get('description') or '')[:70]} |")
+            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or '-'} | {cn(r['full_name'], r.get('description') or '')[:70]} |")
     lines += ["", "---", "", "## 第二部分：本周 Star 增长排名\n", "### 2.1 本周新星爆发榜\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
     if isinstance(new_week, dict) and "items" in new_week:
         for i, r in enumerate(new_week["items"][:15], 1):
-            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or 'N/A'} | {cn(r.get('description') or '')[:60]} |")
+            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or 'N/A'} | {cn(r['full_name'], r.get('description') or '')[:60]} |")
     lines += ["", "### 2.2 本周 Trending\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
     for i, repo in enumerate(trending[:15], 1):
         info = info_cache.get(repo) or repo_info(repo)
         if isinstance(info, dict):
             s = f"{info.get('stargazers_count', 0):,}"
             l = info.get("language") or "N/A"
-            d = (cn(info.get("description") or ""))[:60]
+            d = (cn(repo, info.get("description") or ""))[:60]
         else:
             s, l, d = "?", "?", ""
         lines.append(f"| {i} | **[{repo}](https://github.com/{repo})** | {s} | {l} | {d} |")
