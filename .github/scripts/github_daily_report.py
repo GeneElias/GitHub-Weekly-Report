@@ -192,6 +192,7 @@ def build_report(all_time, new_week, trending):
         repo_names += [r["full_name"] for r in new_week["items"][:15]]
     repo_names += trending[:15]
     native_cn = get_native_chinese_descriptions(repo_names)
+    log(f"README 中文简介命中 {sum(1 for v in native_cn.values() if v)}/{len(repo_names)} 个仓库")
 
     descs = []
     info_cache = {}
