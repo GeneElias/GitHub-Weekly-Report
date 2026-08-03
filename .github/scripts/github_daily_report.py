@@ -223,15 +223,7 @@ def build_report(all_time, new_week, trending):
         return f"翻译暂不可用：{text}" if text else ""
     lines += ["# GitHub 近一周项目分析报告\n", f"**报告日期：** {TODAY}（北京时间）  ", "**数据来源：** GitHub API + GitHub Trending (Weekly)", "", "---", ""]
 
-    lines += ["## 第一部分：总 Star 排名前十（全历史累计）\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
-    if isinstance(all_time, dict) and "items" in all_time:
-        for i, r in enumerate(all_time["items"][:10], 1):
-            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or '-'} | {cn(r['full_name'], r.get('description') or '')[:100]} |")
-    lines += ["", "---", "", "## 第二部分：本周 Star 增长排名\n", "### 2.1 本周新星爆发榜\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
-    if isinstance(new_week, dict) and "items" in new_week:
-        for i, r in enumerate(new_week["items"][:15], 1):
-            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or 'N/A'} | {cn(r['full_name'], r.get('description') or '')[:90]} |")
-    lines += ["", "### 2.2 本周 Trending\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
+    lines += ["## 第一部分：本周 Star 增长排名\n", "### 1.1 本周 Trending\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
     for i, repo in enumerate(trending[:15], 1):
         info = info_cache.get(repo) or repo_info(repo)
         if isinstance(info, dict):
@@ -241,6 +233,14 @@ def build_report(all_time, new_week, trending):
         else:
             s, l, d = "?", "?", ""
         lines.append(f"| {i} | **[{repo}](https://github.com/{repo})** | {s} | {l} | {d} |")
+    lines += ["", "### 1.2 本周新星爆发榜\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
+    if isinstance(new_week, dict) and "items" in new_week:
+        for i, r in enumerate(new_week["items"][:15], 1):
+            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or 'N/A'} | {cn(r['full_name'], r.get('description') or '')[:90]} |")
+    lines += ["", "---", "", "## 第二部分：总 Star 排名前十（全历史累计）\n", "| # | 项目 | Stars | 语言 | 简介 |", "|---|------|------:|------|------|"]
+    if isinstance(all_time, dict) and "items" in all_time:
+        for i, r in enumerate(all_time["items"][:10], 1):
+            lines.append(f"| {i} | **[{r['full_name']}](https://github.com/{r['full_name']})** | {r['stargazers_count']:,} | {r.get('language') or '-'} | {cn(r['full_name'], r.get('description') or '')[:100]} |")
     lines += ["", "---", "", "## 第三部分：趋势解读\n"]
 
     # 实际趋势分析
