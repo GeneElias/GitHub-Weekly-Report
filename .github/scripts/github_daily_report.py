@@ -282,7 +282,7 @@ def build_report(all_time, new_week, trending):
     lines += ["| 语言 | 项目数 |", "|------|:------:|"]
     for lang, c in sorted(lang_counts.items(), key=lambda x: -x[1])[:10]:
         lines.append(f"| {lang} | {c} |")
-    lines += ["", "---", "", f"*本报告由 GitHub Actions 每日自动生成，数据截止 {TODAY}。*\n"]
+    lines += ["", "---", "", f"*本报告由 GitHub Actions 每两天自动生成，数据截止 {TODAY}。*\n"]
     return "\n".join(lines)
 
 
@@ -434,7 +434,7 @@ def push_to_feishu(markdown_content):
                             "content": f"**报告已更新**\n📅 {TODAY}\n\n📄 [飞书文档]({doc_url})\n💻 [GitHub 报告](https://github.com/GeneElias/GitHub-Weekly-Report/blob/main/{REPORT_FILE})"
                         },
                         {"tag": "hr"},
-                        {"tag": "note", "elements": [{"tag": "plain_text", "content": "每日自动生成 · GitHub Actions"}]}
+                        {"tag": "note", "elements": [{"tag": "plain_text", "content": "每两天自动生成 · GitHub Actions"}]}
                     ]
                 }
             }

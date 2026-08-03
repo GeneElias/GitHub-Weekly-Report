@@ -2,7 +2,7 @@ name: 📊 Daily GitHub Report
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 0 */2 * *'  # UTC 00:00, 每两天一次
   workflow_dispatch:
 
 jobs:
