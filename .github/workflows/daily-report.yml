@@ -1,8 +1,8 @@
-name: 📊 Daily GitHub Report
+name: 📊 GitHub Weekly Report
 
 on:
   schedule:
-    - cron: '0 0 */2 * *'  # UTC 00:00, 每两天一次
+    - cron: '0 0 */3 * *'  # UTC 00:00, 每三天一次
   workflow_dispatch:
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           if [ -f "$REPORT_FILE" ]; then
             git add "$REPORT_FILE"
-            git commit -m "chore: daily GitHub report ($(TZ=Asia/Shanghai date +%Y-%m-%d))"
+            git commit -m "chore: GitHub report ($(TZ=Asia/Shanghai date +%Y-%m-%d))"
             git push
             echo "✅ 已推送 $REPORT_FILE"
           else
