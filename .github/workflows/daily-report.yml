@@ -5,17 +5,18 @@ on:
     - cron: '0 0 */3 * *'  # UTC 00:00, 每三天一次
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   generate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GH_PAT }}
+      - uses: actions/checkout@v6
 
       - name: Generate Report
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+          GH_PAT: ${{ github.token }}
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
